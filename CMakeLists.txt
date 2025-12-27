@@ -19,4 +19,8 @@ FetchContent_MakeAvailable(googlebenchmark)
 add_executable(test_mc src/legacy/test_mc.cpp)
 target_include_directories(test_mc PRIVATE src/legacy)
 
+# Add the FDM test executable
+add_executable(test_fdm src/legacy/test_fdm.cpp)
+target_include_directories(test_fdm PRIVATE src/legacy)
+
 add_subdirectory(benchmarks)
