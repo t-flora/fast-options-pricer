@@ -25,18 +25,23 @@ template <class T> void print(const std::vector<T>& myList)
 template <typename U>
 U std_dev(const std::vector<U>& prices, const double r, const double T) {
 
-	// compute difference between square of prices and mean square of prices
+	// compute sample standard deviation using the computational formula:
+	// SD = sqrt((1/(n-1)) * (sum(x_i^2) - (sum(x_i))^2/n))
 	U sum_of_squares = 0;
-	U mean_square = 0; // compute mean square of prices - first sum, then divide by size
+	U sum = 0;
 	for (size_t i = 0; i < prices.size(); i++) {
 		sum_of_squares += prices[i]*prices[i];
-		mean_square += prices[i];
+		sum += prices[i];
 	}
 	
-	mean_square = mean_square*mean_square / prices.size(); // divide by size
-
-	// compute standard deviation
-	U sd = sqrt(((sum_of_squares-mean_square)/(prices.size()-1)) * exp(-r*T));
+	U n = prices.size();
+	U variance = (sum_of_squares - (sum * sum / n)) / (n - 1);
+	
+	// Standard deviation of undiscounted payoffs
+	U sd = sqrt(variance);
+	
+	// Apply discounting: SD(c*X) = |c| * SD(X) where c = exp(-r*T)
+	sd *= exp(-r*T);
 
     return sd;
 }
@@ -72,123 +77,116 @@ namespace SDEDefinition
 	}
 } // End of namespace
 
-int main()
-{
-	std::cout <<  "1 factor MC with explicit Euler\n";
-	// OptionData myOption;
-	OptionData myOption, option2;
-	// T K sig r S b, call, put
-	// { {0.25, 65, 0.30, 0.08, 60}, 2.13337, 5.84628 },	// batch 1
-	// { {1.0, 100, 0.2, 0.0, 100}, 7.96557, 7.96557 },		// batch 2
-	// batch 1
-	// myOption.K = 65.0;
-	// myOption.T = 0.25;
-	// myOption.r = 0.08;
-	// myOption.sig = 0.3;
-	// myOption.type = -1;	// Put -1, Call +1
-	// double S_0 = 60;
+// Function to run a single MC pricing test
+double runMCPricing(OptionData& option, double S_0, long N, long NSim, std::mt19937_64& rng) {
+	std::vector<double> x(N + 1);
+	double dt = option.T / N;
+	for(int i = 0; i <= N; ++i) {
+		x[i] = i * dt;
+	}
 
-	// batch 2
-	myOption.K = 100.0;
-	myOption.T = 1.0;
-	myOption.r = 0.0;
-	myOption.sig = 0.2;
-	myOption.type = 1;	// Put -1, Call +1
-	double S_0 = 100;
-
-	long N = 1000;
-	std::cout << "Number of subintervals in time: " << N << std::endl;
-	// std::cin >> N;
-
-    std::vector<double> x(N + 1);
-    double dt = myOption.T / N;
-    for(int i = 0; i <= N; ++i) {
-        x[i] = i * dt;
-    }
-
-	// Create the basic SDE (Context class)
-	double VOld = S_0;
-	double VNew;
-
-
-	// V2 mediator stuff
-	long NSim = 100000;
-	std::cout << "Number of simulations: " << NSim << std::endl;
-	// std::cin >> NSim;
-
-	double k = myOption.T / double (N);
+	double k = option.T / double(N);
 	double sqrk = sqrt(k);
-
-	// Normal random number
-	double dW;
-	double price = 0.0;	// Option price
-
-	// NormalGenerator is a base class
-    std::mt19937_64 rng(42);
+	
 	std::normal_distribution<double> myNormal(0.0, 1.0);
-
+	
 	using namespace SDEDefinition;
-	SDEDefinition::data = &myOption;
+	SDEDefinition::data = &option;
 
-	std::vector<double> prices(NSim);
+	double price = 0.0;
 	int coun = 0; // Number of times S hits origin
 
-	// A.
-	for (long i = 1; i <= NSim; ++i)
-	{ // Calculate a path at each iteration
-			
-		if ((i/10000) * 10000 == i)
-		{// Give status after each 1000th iteration
-				std::cout << i << std::endl;
+	for (long i = 1; i <= NSim; ++i) {
+		if ((i/50000) * 50000 == i) {
+			std::cout << "  Simulation " << i << "/" << NSim << std::endl;
 		}
 
-		VOld = S_0;
-		for (unsigned long index = 1; index < x.size(); ++index)
-		{
-
-			// Create a random number
-			dW = myNormal(rng);
-				
-			// The FDM (in this case explicit Euler)
-			VNew = VOld  + (k * drift(x[index-1], VOld))
+		double VOld = S_0;
+		double VNew;
+		
+		for (unsigned long index = 1; index < x.size(); ++index) {
+			double dW = myNormal(rng);
+			VNew = VOld + (k * drift(x[index-1], VOld))
 						+ (sqrk * diffusion(x[index-1], VOld) * dW);
-
 			VOld = VNew;
 
-			// Spurious values
 			if (VNew <= 0.0) coun++;
 		}
-			
-		double tmp = myOption.myPayOffFunction(VNew);
-		prices[i-1] = tmp;
-		price += (tmp)/double(NSim);
+		
+		double tmp = option.myPayOffFunction(VNew);
+		price += tmp / double(NSim);
 	}
 	
-	// D. Finally, discounting the average price
-	price *= exp(-myOption.r * myOption.T);
-
-	// Cleanup not needed; std::normal_distribution is not allocated with new
-
-	std::cout << "Values for batch 2 call" << std::endl;
-	std::cout << "Price, after discounting: " << price << ", " << std::endl;
-	std::cout << "Number of times origin is hit: " << coun << std::endl;
-	std::cout << "Standard deviation: " << std_dev(prices, myOption.r, myOption.T) << endl;
-	std::cout << "Standard error: " << std_err(prices, myOption.r, myOption.T) << endl;
-
-	// file output handling - append result to file (this was changed between runs of different batches)
-	std::ofstream out_file("out_b2_call.txt", std::ios::app);  // Open in append mode
+	// Discount the average price
+	price *= exp(-option.r * option.T);
 	
-	// check if file is empty
-	out_file.seekp(0, std::ios::end);
-	if (out_file.tellp() == 0) { // if file is empty, add headers
-		out_file << "N,NSIM,SD,SE" << std::endl;
+	if (coun > 0) {
+		std::cout << "  Warning: Origin hit " << coun << " times" << std::endl;
 	}
 	
-	// append the data
-	out_file << N << ","
-			<< NSim << ","
-			<< std_dev(prices, myOption.r, myOption.T) << "," 
-			<< std_err(prices, myOption.r, myOption.T) << std::endl;
+	return price;
+}
+
+int main()
+{
+	std::cout << "Monte Carlo Option Pricer - Testing Accuracy\n";
+	std::cout << std::string(60, '=') << "\n\n";
+	
+	// Test parameters
+	long N = 1000;      // Time steps
+	long NSim = 500000; // Simulations (increased for better accuracy)
+	
+	std::cout << "Parameters:" << std::endl;
+	std::cout << "  Time steps (N): " << N << std::endl;
+	std::cout << "  Simulations (NSim): " << NSim << std::endl;
+	std::cout << std::endl;
+	
+	std::mt19937_64 rng(42); // Fixed seed for reproducibility
+	
+	// Test cases: T, K, sig, r, S_0, expected_price, type_name
+	struct TestCase {
+		double T, K, sig, r, S_0, expected;
+		int type; // 1 = Call, -1 = Put
+		std::string name;
+	};
+	
+	std::vector<TestCase> testCases = {
+		{0.25, 65.0, 0.30, 0.08, 60.0, 2.13337, 1, "Batch 1 Call"},
+		{0.25, 65.0, 0.30, 0.08, 60.0, 5.84628, -1, "Batch 1 Put"},
+		{1.0, 100.0, 0.20, 0.00, 100.0, 7.96557, 1, "Batch 2 Call"},
+		{1.0, 100.0, 0.20, 0.00, 100.0, 7.96557, -1, "Batch 2 Put"}
+	};
+	
+	// Run tests
+	for (const auto& test : testCases) {
+		std::cout << "Testing " << test.name << std::endl;
+		std::cout << "  Parameters: S0=" << test.S_0 << ", K=" << test.K 
+				  << ", T=" << test.T << ", r=" << test.r << ", σ=" << test.sig << std::endl;
+		std::cout << "  Expected: " << test.expected << std::endl;
+		
+		OptionData option;
+		option.K = test.K;
+		option.T = test.T;
+		option.r = test.r;
+		option.sig = test.sig;
+		option.type = test.type;
+		
+		double computed = runMCPricing(option, test.S_0, N, NSim, rng);
+		double error = std::abs(computed - test.expected);
+		double rel_error = error / test.expected * 100.0;
+		
+		std::cout << "  Computed: " << computed << std::endl;
+		std::cout << "  Absolute Error: " << error << std::endl;
+		std::cout << "  Relative Error: " << rel_error << "%" << std::endl;
+		
+		// Check 2 decimal accuracy (0.005 tolerance)
+		bool passed = (error < 0.005);
+		std::cout << "  Status: " << (passed ? "PASS ✓" : "FAIL ✗") 
+				  << " (2 decimal accuracy)" << std::endl;
+		std::cout << std::endl;
+	}
+	
+	std::cout << std::string(60, '=') << std::endl;
 
 	return 0;
 }

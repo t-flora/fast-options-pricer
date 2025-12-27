@@ -15,4 +15,8 @@ FetchContent_Declare(
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googlebenchmark)
 
+# Add the legacy test executable
+add_executable(test_mc src/legacy/test_mc.cpp)
+target_include_directories(test_mc PRIVATE src/legacy)
+
 add_subdirectory(benchmarks)
